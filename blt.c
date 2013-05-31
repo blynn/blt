@@ -26,6 +26,7 @@
 
 static inline int has_tag(void *p) { return 1 & (intptr_t)p; }
 static inline void *untag(void *p) { return ((char *)p) - 1; }
+static inline int decide(uint8_t c, uint8_t m) { return (1 + (m | c)) >> 8; }
 
 struct blt_leaf_s {
   char *key;
@@ -71,7 +72,7 @@ BLT_it *blt_nextprev(BLT *blt, BLT_it *it, int way) {
   void *other = 0;
   while (has_tag(p)) {
     blt_node_ptr q = untag(p);
-    int dir = (1 + (q->mask | it->key[q->byte])) >> 8;
+    int dir = decide(q->mask, it->key[q->byte]);
     if (dir == way) other = q->kid[1 - way];
     p = q->kid[dir];
   }
@@ -89,9 +90,8 @@ BLT_it *blt_ceilfloor(BLT *blt, char *key, int way) {
   int keylen = strlen(key);
   while (has_tag(p)) {
     blt_node_ptr q = untag(p);
-    int dir = 0;  // Arbitrary; when q->byte >= keylen, either kid works.
-    if (q->byte < keylen) dir = (1 + (q->mask | key[q->byte])) >> 8;
-    p = q->kid[dir];
+    // When q->byte >= keylen, either kid works. We pick 0.
+    p = q->kid[q->byte < keylen ? decide(key[q->byte], q->mask) : 0];
   }
   // Compare keys.
   char *c = key, *pc = ((blt_leaf_ptr) p)->key;
@@ -102,7 +102,7 @@ BLT_it *blt_ceilfloor(BLT *blt, char *key, int way) {
       int byte = c - key;
       while (x&(x-1)) x &= x-1;
       x = ~x;
-      int ndir = (1 + (x | key[byte])) >> 8;
+      int ndir = decide(x, key[byte]);
       void *other = 0;
       // Walk down the tree until we hit an external node or a node
       // whose crit bit is higher.
@@ -113,7 +113,7 @@ BLT_it *blt_ceilfloor(BLT *blt, char *key, int way) {
         blt_node_ptr q = untag(p);
         if (byte < q->byte ||
             (byte == q->byte && x < q->mask)) break;
-        int dir = (1 + (q->mask | key[q->byte])) >> 8;
+        int dir = decide(q->mask, key[q->byte]);
         if (dir == way) {
           other = q->kid[1 - way];
         }
@@ -148,9 +148,8 @@ void blt_put(BLT *blt, char *key, void *data) {
   int keylen = strlen(key);
   while (has_tag(p)) {
     blt_node_ptr q = untag(p);
-    int dir = 0;  // Arbitrary; when q->byte >= keylen, either kid works.
-    if (q->byte < keylen) dir = (1 + (q->mask | key[q->byte])) >> 8;
-    p = q->kid[dir];
+    // When q->byte >= keylen, either kid works. We pick 0.
+    p = q->kid[q->byte < keylen ? decide(key[q->byte], q->mask) : 0];
   }
   // Compare keys.
   char *c = key, *pc = ((blt_leaf_ptr) p)->key;
@@ -167,7 +166,7 @@ void blt_put(BLT *blt, char *key, void *data) {
       blt_leaf_ptr leaf = malloc(sizeof(*leaf));
       leaf->key = strdup(key);
       leaf->data = data;
-      int ndir = (1 + (n->mask | key[n->byte])) >> 8;
+      int ndir = decide(key[n->byte], n->mask);
       n->kid[ndir] = leaf;
 
       // Insert the new node.
@@ -180,7 +179,7 @@ void blt_put(BLT *blt, char *key, void *data) {
         blt_node_ptr q = untag(p);
         if (n->byte < q->byte ||
             (n->byte == q->byte && n->mask < q->mask)) break;
-        p0 = q->kid + ((1 + (q->mask | key[q->byte])) >> 8);
+        p0 = q->kid + decide(key[q->byte], q->mask);
       }
       n->kid[1 - ndir] = *p0;
       *p0 = 1 + (char *)n;
