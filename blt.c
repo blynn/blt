@@ -30,6 +30,12 @@
 
 static inline int has_tag(void *p) { return 1 & (intptr_t)p; }
 static inline void *untag(void *p) { return ((char *)p) - 1; }
+// Bit twidding: zero all bits except leading bit, then invert.
+// Storing the crit bit in this mask form simplifies decide() to 
+static inline uint8_t to_mask(uint8_t x) {
+  while (x&(x-1)) x &= x-1;
+  return 255 - x;
+}
 static inline int decide(uint8_t c, uint8_t m) { return (1 + (m | c)) >> 8; }
 
 struct blt_leaf_s {
@@ -105,14 +111,12 @@ BLT_it *blt_ceilfloor(BLT *blt, char *key, int way) {
   blt_leaf_ptr p = confident_get(blt, key);
   if (!p) return 0;
   // Compare keys.
-  char *c = key, *pc = p->key;
-  for (;;) {
+  for(char *c = key, *pc = p->key;; c++, pc++) {
     // XOR the current bytes being compared.
     uint8_t x = *c ^ *pc;
     if (x) {
       int byte = c - key;
-      while (x&(x-1)) x &= x-1;
-      x = ~x;
+      x = to_mask(x);
       int ndir = decide(x, key[byte]);
       void *other = 0;
       // Walk down the tree until we hit an external node or a node
@@ -131,7 +135,6 @@ BLT_it *blt_ceilfloor(BLT *blt, char *key, int way) {
       return blt_firstlast(other, way);
     }
     if (!*c) return (BLT_it *)p;
-    c++, pc++;
   }
 }
 
@@ -157,8 +160,7 @@ void blt_put(BLT *blt, char *key, void *data) {
       // Find crit bit using bit twiddling tricks.
       blt_node_ptr n = malloc(sizeof(*n));
       n->byte = c - key;
-      while (x&(x-1)) x &= x-1;
-      n->mask = 255 - x;
+      n->mask = to_mask(x);
       blt_leaf_ptr leaf = malloc(sizeof(*leaf));
       int ndir = decide(key[n->byte], n->mask);
       n->kid[ndir] = leaf;
@@ -191,15 +193,14 @@ int blt_delete(BLT *blt, char *key) {
   char *p = blt->root;
   if (!p) return 0;
   int keylen = strlen(key);
-  void **p0 = &blt->root;
-  void **q0 = 0;
+  void **p0 = &blt->root, **q0 = 0;
   blt_node_ptr q;
   int dir;
   while (has_tag(p)) {
-    q0 = p0;
     q = untag(p);
     if (q->byte > keylen) return 0;
     dir = decide(q->mask, key[q->byte]);
+    q0 = p0;
     p0 = q->kid + dir;
     p = *p0;
   }
@@ -227,27 +228,73 @@ void blt_dump(BLT* blt, void *p) {
   printf("  %s\n", (char *) ((blt_leaf_ptr) p)->key);
 }
 
+static void split(char *s, void (*fun)(char *)) {
+  for (char *p = s, *q = p;; q++) if (*q == ' ' || *q == '\0') {
+    char *tmp = strndup(p, q - p);
+    fun(tmp);
+    free(tmp);
+    if (*q == '\0') break;
+    p = q + 1;
+  }
+}
+
+int blt_allprefixed(BLT *blt, char *key, int (*fun)(BLT_it *)) {
+  char *p = blt->root;
+  if (!p) return 1;
+  char *top = p;
+  int keylen = strlen(key);
+  while (has_tag(p)) {
+    blt_node_ptr q = untag(p);
+    if (q->byte >= keylen) {
+      p = q->kid[0];
+    } else {
+      p = q->kid[decide(q->mask, key[q->byte])];
+      top = p;
+    }
+  }
+  if (strncmp(key, ((blt_leaf_ptr)p)->key, keylen)) return 1;
+  int traverse(char *p) {
+    if (has_tag(p)) {
+      blt_node_ptr q = untag(p);
+      for (int dir = 0; dir < 2; dir++) {
+        int status = traverse(q->kid[dir]);
+        switch(status) {
+        case 1: break;
+        case 0: return 0;
+        default: return status;
+        }
+      }
+      return 1;
+    }
+    return fun((BLT_it *)p);
+  }
+  return traverse(top);
+}
+
 int main() {
   BLT* blt = blt_new();
-  char sentence[] =
-      "the quick brown fox jumps over the lazy dog "
-      "thee quiet brow fix jump overload l d"
-      "";
-  for (char *s = sentence, *t = s; s != sentence + sizeof(sentence); t++) {
-    if (*t == ' ') *t = '\0';
-    if (!*t) blt_put(blt, s, 0), s = t + 1;
-  }
-  blt_dump(blt, blt->root);
+  void add(char *s) { blt_put(blt, s, s); }
+  void del(char *s) { blt_delete(blt, s); }
+  split("the quick brown fox jumps over the lazy dog", add);
+  split("tee quiet brow fix jump overload l d", add);
+  split("thee thigh though thumb", add);
+  int cb(BLT_it *it) { printf(" %s", it->key); return 1; }
+  blt_allprefixed(blt, "t", cb);
+  puts("");
+  blt_allprefixed(blt, "th", cb);
+  puts("");
+  puts("forward:");
   for (BLT_it *it = blt_first(blt); it; it = blt_next(blt, it)) {
-    printf("it: %s\n", it->key);
+    printf(" %s", it->key);
   }
-  blt_delete(blt, "l");
-  blt_delete(blt, "d");
-  blt_delete(blt, "brow");
-  blt_delete(blt, "overload");
+  puts("");
+  split("tee quiet brow fix jump overload l d", del);
+  split("thee thigh though thumb", del);
+  puts("reverse:");
   for (BLT_it *it = blt_last(blt); it; it = blt_prev(blt, it)) {
-    printf("it: %s\n", it->key);
+    printf(" %s", it->key);
   }
+  puts("");
   printf("%s\n", blt_ceil(blt, "dog")->key);
   printf("%s\n", blt_ceil(blt, "cat")->key);
   printf("%s\n", blt_ceil(blt, "fog")->key);
