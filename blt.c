@@ -20,6 +20,7 @@
 //   - We combine a couple of comparisons. Instead of byte0 < byte1 and then
 //     mask0 < mask1 if they are equal, we simplify to:
 //       (byte0 << 8) + mask0 < (byte1 << 8) + mask1
+//   - Deletion:
 
 #include <assert.h>
 #include <stdio.h>
@@ -86,18 +87,25 @@ BLT_it *blt_nextprev(BLT *blt, BLT_it *it, int way) {
 BLT_it *blt_next(BLT *blt, BLT_it *it) { return blt_nextprev(blt, it, 0); }
 BLT_it *blt_prev(BLT *blt, BLT_it *it) { return blt_nextprev(blt, it, 1); }
 
-BLT_it *blt_ceilfloor(BLT *blt, char *key, int way) {
-  // Walk down the tree as if the key is there.
+// Walk down the tree as if the key is there.
+static inline blt_leaf_ptr confident_get(BLT *blt, char *key) {
   char *p = blt->root;
   if (!p) return NULL;
   int keylen = strlen(key);
   while (has_tag(p)) {
     blt_node_ptr q = untag(p);
-    // When q->byte >= keylen, either kid works. We pick 0.
+    // When q->byte >= keylen, key is absent, but we must return something.
+    // Either kid works; we pick 0 each time.
     p = q->kid[q->byte < keylen ? decide(key[q->byte], q->mask) : 0];
   }
+  return (void *)p;
+}
+
+BLT_it *blt_ceilfloor(BLT *blt, char *key, int way) {
+  blt_leaf_ptr p = confident_get(blt, key);
+  if (!p) return 0;
   // Compare keys.
-  char *c = key, *pc = ((blt_leaf_ptr) p)->key;
+  char *c = key, *pc = p->key;
   for (;;) {
     // XOR the current bytes being compared.
     uint8_t x = *c ^ *pc;
@@ -116,19 +124,13 @@ BLT_it *blt_ceilfloor(BLT *blt, char *key, int way) {
         blt_node_ptr q = untag(p);
         if ((byte << 8) + x < (q->byte << 8) + q->mask) break;
         int dir = decide(q->mask, key[q->byte]);
-        if (dir == way) {
-          other = q->kid[1 - way];
-        }
+        if (dir == way) other = q->kid[1 - way];
         p0 = q->kid + dir;
       }
-      if (ndir == way) {
-        other = *p0;
-      }
+      if (ndir == way) other = *p0;
       return blt_firstlast(other, way);
     }
-    if (!*c) {
-      return (BLT_it *)p;
-    }
+    if (!*c) return (BLT_it *)p;
     c++, pc++;
   }
 }
@@ -138,24 +140,16 @@ BLT_it *blt_floor(BLT *blt, char *key) { return blt_ceilfloor(blt, key, 1); }
 
 void blt_put(BLT *blt, char *key, void *data) {
   blt->count++;
-  if (!blt->root) {  // Empty tree case.
-    blt_leaf_ptr p = malloc(sizeof(*p));
+  blt_leaf_ptr p = confident_get(blt, key);
+  if (!p) {  // Empty tree case.
+    p = malloc(sizeof(*p));
     blt->root = p;
     p->key = strdup(key);
     p->data = data;
     return;
   }
-  // Walk down the tree as if the key is there.
-  char *p = blt->root;
-  int keylen = strlen(key);
-  while (has_tag(p)) {
-    blt_node_ptr q = untag(p);
-    // When q->byte >= keylen, either kid works. We pick 0.
-    p = q->kid[q->byte < keylen ? decide(key[q->byte], q->mask) : 0];
-  }
   // Compare keys.
-  char *c = key, *pc = ((blt_leaf_ptr) p)->key;
-  for (;;) {
+  for(char *c = key, *pc = p->key;; c++, pc++) {
     // XOR the current bytes being compared.
     uint8_t x = *c ^ *pc;
     if (x) {
@@ -190,8 +184,36 @@ void blt_put(BLT *blt, char *key, void *data) {
       ((blt_leaf_ptr) p)->data = data;
       return;
     }
-    c++, pc++;
   }
+}
+
+int blt_delete(BLT *blt, char *key) {
+  char *p = blt->root;
+  if (!p) return 0;
+  int keylen = strlen(key);
+  void **p0 = &blt->root;
+  void **q0 = 0;
+  blt_node_ptr q;
+  int dir;
+  while (has_tag(p)) {
+    q0 = p0;
+    q = untag(p);
+    if (q->byte > keylen) return 0;
+    dir = decide(q->mask, key[q->byte]);
+    p0 = q->kid + dir;
+    p = *p0;
+  }
+  blt_leaf_ptr leaf = (blt_leaf_ptr)p;
+  if (strcmp(key, leaf->key)) return 0;
+  free(leaf->key);
+  free(leaf);
+  if (!q0) {
+    blt->root = 0;
+    return 1;
+  }
+  *q0 = q->kid[1 - dir];
+  free(q);
+  return 1;
 }
 
 void blt_dump(BLT* blt, void *p) {
@@ -207,7 +229,10 @@ void blt_dump(BLT* blt, void *p) {
 
 int main() {
   BLT* blt = blt_new();
-  char sentence[] = "the quick brown fox jumps over the lazy dog";
+  char sentence[] =
+      "the quick brown fox jumps over the lazy dog "
+      "thee quiet brow fix jump overload l d"
+      "";
   for (char *s = sentence, *t = s; s != sentence + sizeof(sentence); t++) {
     if (*t == ' ') *t = '\0';
     if (!*t) blt_put(blt, s, 0), s = t + 1;
@@ -216,6 +241,10 @@ int main() {
   for (BLT_it *it = blt_first(blt); it; it = blt_next(blt, it)) {
     printf("it: %s\n", it->key);
   }
+  blt_delete(blt, "l");
+  blt_delete(blt, "d");
+  blt_delete(blt, "brow");
+  blt_delete(blt, "overload");
   for (BLT_it *it = blt_last(blt); it; it = blt_prev(blt, it)) {
     printf("it: %s\n", it->key);
   }
