@@ -17,6 +17,9 @@
 //     of the current node is less than the key length, so there's no
 //     need for special-case code to handle keys shorter than the crit
 //     bit.
+//   - We combine a couple of comparisons. Instead of byte0 < byte1 and then
+//     mask0 < mask1 if they are equal, we simplify to:
+//       (byte0 << 8) + mask0 < (byte1 << 8) + mask1
 
 #include <assert.h>
 #include <stdio.h>
@@ -97,7 +100,7 @@ BLT_it *blt_ceilfloor(BLT *blt, char *key, int way) {
   char *c = key, *pc = ((blt_leaf_ptr) p)->key;
   for (;;) {
     // XOR the current bytes being compared.
-    unsigned char x = *c ^ *pc;
+    uint8_t x = *c ^ *pc;
     if (x) {
       int byte = c - key;
       while (x&(x-1)) x &= x-1;
@@ -111,8 +114,7 @@ BLT_it *blt_ceilfloor(BLT *blt, char *key, int way) {
         char *p = *p0;
         if (!has_tag(p)) break;
         blt_node_ptr q = untag(p);
-        if (byte < q->byte ||
-            (byte == q->byte && x < q->mask)) break;
+        if ((byte << 8) + x < (q->byte << 8) + q->mask) break;
         int dir = decide(q->mask, key[q->byte]);
         if (dir == way) {
           other = q->kid[1 - way];
@@ -155,19 +157,19 @@ void blt_put(BLT *blt, char *key, void *data) {
   char *c = key, *pc = ((blt_leaf_ptr) p)->key;
   for (;;) {
     // XOR the current bytes being compared.
-    unsigned char x = *c ^ *pc;
+    uint8_t x = *c ^ *pc;
     if (x) {
       // Allocate a new node.
       // Find crit bit using bit twiddling tricks.
       blt_node_ptr n = malloc(sizeof(*n));
       n->byte = c - key;
       while (x&(x-1)) x &= x-1;
-      n->mask = ~x;
+      n->mask = 255 - x;
       blt_leaf_ptr leaf = malloc(sizeof(*leaf));
-      leaf->key = strdup(key);
-      leaf->data = data;
       int ndir = decide(key[n->byte], n->mask);
       n->kid[ndir] = leaf;
+      leaf->key = strdup(key);
+      leaf->data = data;
 
       // Insert the new node.
       // Walk down the tree until we hit an external node or a node
@@ -177,8 +179,7 @@ void blt_put(BLT *blt, char *key, void *data) {
         char *p = *p0;
         if (!has_tag(p)) break;
         blt_node_ptr q = untag(p);
-        if (n->byte < q->byte ||
-            (n->byte == q->byte && n->mask < q->mask)) break;
+        if ((n->byte << 8) + n->mask < (q->byte << 8) + q->mask) break;
         p0 = q->kid + decide(key[q->byte], q->mask);
       }
       n->kid[1 - ndir] = *p0;
