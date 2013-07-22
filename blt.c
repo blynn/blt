@@ -12,15 +12,15 @@
 //     but for simplicity we always follow the left child.
 //     Our code skips a tiny bit of computation by assigning
 //     direction = 0 rather than c = 0 plus some bit twiddling.
-//   - While walking down the tree when inserting a new key (after we've
-//     figured out the crit bit), we're guaranteed that the byte number
-//     of the current node is less than the key length, so there's no
-//     need for special-case code to handle keys shorter than the crit
-//     bit.
+//   - Insertion: while walking down the tree (after we've figured out the crit
+//     bit), we're guaranteed that the byte number of the current node is less
+//     than the key length, so there's no need for special-case code to handle
+//     keys shorter than the crit bit.
 //   - We combine a couple of comparisons. Instead of byte0 < byte1 and then
 //     mask0 < mask1 if they are equal, we simplify to:
 //       (byte0 << 8) + mask0 < (byte1 << 8) + mask1
-//   - Deletion:
+//   - Deletion: we can return early if the key length is shorter than
+//     the current node's critical bit, as this implies the key is absent.
 
 #include <assert.h>
 #include <stdio.h>
