@@ -27,6 +27,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include "blt.h"
 
 static inline int has_tag(void *p) { return 1 & (intptr_t)p; }
 static inline void *untag(void *p) { return ((char *)p) - 1; }
@@ -38,13 +39,6 @@ static inline uint8_t to_mask(uint8_t x) {
 }
 static inline int decide(uint8_t c, uint8_t m) { return (1 + (m | c)) >> 8; }
 
-struct blt_leaf_s {
-  char *key;
-  void *data;
-};
-typedef struct blt_leaf_s *blt_leaf_ptr;
-typedef struct blt_leaf_s BLT_it;
-
 struct blt_node_s {
   void *kid[2];
   unsigned int byte:24;  // Byte # of difference.
@@ -54,11 +48,10 @@ typedef struct blt_node_s *blt_node_ptr;
 // The blt_node_ptr pointers are tagged: LSB = 1 means internal node,
 // LSB = 0 means external.
 
-struct blt_s {
+struct BLT {
   int count;
   void *root;
 };
-typedef struct blt_s BLT;
 
 BLT *blt_new() {
   BLT *blt = malloc(sizeof(*blt));
@@ -67,17 +60,17 @@ BLT *blt_new() {
   return blt;
 }
 
-BLT_it *blt_firstlast(void *p, int dir) {
+BLT_IT *blt_firstlast(void *p, int dir) {
   if (!p) return NULL;
   while (has_tag(p)) p = ((blt_node_ptr)untag(p))->kid[dir];
   return p;
 }
 
-BLT_it *blt_first(BLT *blt) { return blt_firstlast(blt->root, 0); }
-BLT_it *blt_last (BLT *blt) { return blt_firstlast(blt->root, 1); }
+BLT_IT *blt_first(BLT *blt) { return blt_firstlast(blt->root, 0); }
+BLT_IT *blt_last (BLT *blt) { return blt_firstlast(blt->root, 1); }
 
 // 'it' must be an element of 'blt'.
-BLT_it *blt_nextprev(BLT *blt, BLT_it *it, int way) {
+BLT_IT *blt_nextprev(BLT *blt, BLT_IT *it, int way) {
   char *p = blt->root;
   void *other = 0;
   while (has_tag(p)) {
@@ -86,15 +79,15 @@ BLT_it *blt_nextprev(BLT *blt, BLT_it *it, int way) {
     if (dir == way) other = q->kid[1 - way];
     p = q->kid[dir];
   }
-  assert(!strcmp(((BLT_it *)p)->key, it->key));
+  assert(!strcmp(((BLT_IT *)p)->key, it->key));
   return blt_firstlast(other, way);
 }
 
-BLT_it *blt_next(BLT *blt, BLT_it *it) { return blt_nextprev(blt, it, 0); }
-BLT_it *blt_prev(BLT *blt, BLT_it *it) { return blt_nextprev(blt, it, 1); }
+BLT_IT *blt_next(BLT *blt, BLT_IT *it) { return blt_nextprev(blt, it, 0); }
+BLT_IT *blt_prev(BLT *blt, BLT_IT *it) { return blt_nextprev(blt, it, 1); }
 
 // Walk down the tree as if the key is there.
-static inline blt_leaf_ptr confident_get(BLT *blt, char *key) {
+static inline BLT_IT *confident_get(BLT *blt, char *key) {
   char *p = blt->root;
   if (!p) return NULL;
   int keylen = strlen(key);
@@ -107,8 +100,8 @@ static inline blt_leaf_ptr confident_get(BLT *blt, char *key) {
   return (void *)p;
 }
 
-BLT_it *blt_ceilfloor(BLT *blt, char *key, int way) {
-  blt_leaf_ptr p = confident_get(blt, key);
+BLT_IT *blt_ceilfloor(BLT *blt, char *key, int way) {
+  BLT_IT *p = confident_get(blt, key);
   if (!p) return 0;
   // Compare keys.
   for(char *c = key, *pc = p->key;; c++, pc++) {
@@ -134,16 +127,16 @@ BLT_it *blt_ceilfloor(BLT *blt, char *key, int way) {
       if (ndir == way) other = *p0;
       return blt_firstlast(other, way);
     }
-    if (!*c) return (BLT_it *)p;
+    if (!*c) return (BLT_IT *)p;
   }
 }
 
-BLT_it *blt_ceil (BLT *blt, char *key) { return blt_ceilfloor(blt, key, 0); }
-BLT_it *blt_floor(BLT *blt, char *key) { return blt_ceilfloor(blt, key, 1); }
+BLT_IT *blt_ceil (BLT *blt, char *key) { return blt_ceilfloor(blt, key, 0); }
+BLT_IT *blt_floor(BLT *blt, char *key) { return blt_ceilfloor(blt, key, 1); }
 
 void blt_put(BLT *blt, char *key, void *data) {
   blt->count++;
-  blt_leaf_ptr p = confident_get(blt, key);
+  BLT_IT *p = confident_get(blt, key);
   if (!p) {  // Empty tree case.
     p = malloc(sizeof(*p));
     blt->root = p;
@@ -161,7 +154,7 @@ void blt_put(BLT *blt, char *key, void *data) {
       blt_node_ptr n = malloc(sizeof(*n));
       n->byte = c - key;
       n->mask = to_mask(x);
-      blt_leaf_ptr leaf = malloc(sizeof(*leaf));
+      BLT_IT *leaf = malloc(sizeof(*leaf));
       int ndir = decide(key[n->byte], n->mask);
       n->kid[ndir] = leaf;
       leaf->key = strdup(key);
@@ -183,7 +176,7 @@ void blt_put(BLT *blt, char *key, void *data) {
       return;
     }
     if (!*c) {
-      ((blt_leaf_ptr) p)->data = data;
+      ((BLT_IT *) p)->data = data;
       return;
     }
   }
@@ -204,7 +197,7 @@ int blt_delete(BLT *blt, char *key) {
     p0 = q->kid + dir;
     p = *p0;
   }
-  blt_leaf_ptr leaf = (blt_leaf_ptr)p;
+  BLT_IT *leaf = (BLT_IT *)p;
   if (strcmp(key, leaf->key)) return 0;
   free(leaf->key);
   free(leaf);
@@ -225,20 +218,10 @@ void blt_dump(BLT* blt, void *p) {
     blt_dump(blt, q->kid[1]);
     return;
   }
-  printf("  %s\n", (char *) ((blt_leaf_ptr) p)->key);
+  printf("  %s\n", (char *) ((BLT_IT *) p)->key);
 }
 
-static void split(char *s, void (*fun)(char *)) {
-  for (char *p = s, *q = p;; q++) if (*q == ' ' || *q == '\0') {
-    char *tmp = strndup(p, q - p);
-    fun(tmp);
-    free(tmp);
-    if (*q == '\0') break;
-    p = q + 1;
-  }
-}
-
-int blt_allprefixed(BLT *blt, char *key, int (*fun)(BLT_it *)) {
+int blt_allprefixed(BLT *blt, char *key, int (*fun)(BLT_IT *)) {
   char *p = blt->root;
   if (!p) return 1;
   char *top = p;
@@ -252,7 +235,7 @@ int blt_allprefixed(BLT *blt, char *key, int (*fun)(BLT_it *)) {
       top = p;
     }
   }
-  if (strncmp(key, ((blt_leaf_ptr)p)->key, keylen)) return 1;
+  if (strncmp(key, ((BLT_IT *)p)->key, keylen)) return 1;
   int traverse(char *p) {
     if (has_tag(p)) {
       blt_node_ptr q = untag(p);
@@ -266,38 +249,7 @@ int blt_allprefixed(BLT *blt, char *key, int (*fun)(BLT_it *)) {
       }
       return 1;
     }
-    return fun((BLT_it *)p);
+    return fun((BLT_IT *)p);
   }
   return traverse(top);
-}
-
-int main() {
-  BLT* blt = blt_new();
-  void add(char *s) { blt_put(blt, s, s); }
-  void del(char *s) { blt_delete(blt, s); }
-  split("the quick brown fox jumps over the lazy dog", add);
-  split("tee quiet brow fix jump overload l d", add);
-  split("thee thigh though thumb", add);
-  int cb(BLT_it *it) { printf(" %s", it->key); return 1; }
-  blt_allprefixed(blt, "t", cb);
-  puts("");
-  blt_allprefixed(blt, "th", cb);
-  puts("");
-  puts("forward:");
-  for (BLT_it *it = blt_first(blt); it; it = blt_next(blt, it)) {
-    printf(" %s", it->key);
-  }
-  puts("");
-  split("tee quiet brow fix jump overload l d", del);
-  split("thee thigh though thumb", del);
-  puts("reverse:");
-  for (BLT_it *it = blt_last(blt); it; it = blt_prev(blt, it)) {
-    printf(" %s", it->key);
-  }
-  puts("");
-  printf("%s\n", blt_ceil(blt, "dog")->key);
-  printf("%s\n", blt_ceil(blt, "cat")->key);
-  printf("%s\n", blt_ceil(blt, "fog")->key);
-  printf("%s\n", blt_ceil(blt, "foz")->key);
-  return 0;
 }
