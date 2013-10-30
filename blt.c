@@ -32,7 +32,7 @@
 static inline int has_tag(void *p) { return 1 & (intptr_t)p; }
 static inline void *untag(void *p) { return ((char *)p) - 1; }
 // Bit twidding: zero all bits except leading bit, then invert.
-// Storing the crit bit in this mask form simplifies decide() to 
+// Storing the crit bit in this mask form simplifies decide().
 static inline uint8_t to_mask(uint8_t x) {
   while (x&(x-1)) x &= x-1;
   return 255 - x;
@@ -40,24 +40,42 @@ static inline uint8_t to_mask(uint8_t x) {
 static inline int decide(uint8_t c, uint8_t m) { return (1 + (m | c)) >> 8; }
 
 struct blt_node_s {
+  // Tagged pointer:
+  //   LSB = 0 for leaf node,
+  //   LSB = 1 for internal node. 
   void *kid[2];
-  unsigned int byte:24;  // Byte # of difference.
   unsigned int mask:8;   // ~mask = the crit bit within the byte.
+  unsigned int byte:24;  // Byte # of difference.
 };
 typedef struct blt_node_s *blt_node_ptr;
 // The blt_node_ptr pointers are tagged: LSB = 1 means internal node,
 // LSB = 0 means external.
 
 struct BLT {
-  int count;
   void *root;
 };
 
 BLT *blt_new() {
   BLT *blt = malloc(sizeof(*blt));
-  blt->count = 0;
   blt->root = 0;
   return blt;
+}
+
+size_t blt_overhead(BLT *blt) {
+  size_t n = sizeof(BLT);
+  if (!blt->root) return n;
+  void add(void *p) {
+    if (has_tag(p)) {
+      n += sizeof(struct blt_node_s);
+      void **kid = ((blt_node_ptr)untag(p))->kid;
+      add(kid[0]);
+      add(kid[1]);
+    } else {
+      n += sizeof(BLT_IT);
+    }
+  }
+  add(blt->root);
+  return n;
 }
 
 BLT_IT *blt_firstlast(void *p, int dir) {
@@ -135,7 +153,6 @@ BLT_IT *blt_ceil (BLT *blt, char *key) { return blt_ceilfloor(blt, key, 0); }
 BLT_IT *blt_floor(BLT *blt, char *key) { return blt_ceilfloor(blt, key, 1); }
 
 void blt_put(BLT *blt, char *key, void *data) {
-  blt->count++;
   BLT_IT *p = confident_get(blt, key);
   if (!p) {  // Empty tree case.
     p = malloc(sizeof(*p));
@@ -252,4 +269,17 @@ int blt_allprefixed(BLT *blt, char *key, int (*fun)(BLT_IT *)) {
     return fun((BLT_IT *)p);
   }
   return traverse(top);
+}
+
+BLT_IT *blt_get(BLT *blt, char *key) {
+  char *p = blt->root;
+  if (!p) return NULL;
+  int keylen = strlen(key);
+  while (has_tag(p)) {
+    blt_node_ptr q = untag(p);
+    if (q->byte > keylen) return NULL;
+    p = q->kid[decide(key[q->byte], q->mask)];
+  }
+  BLT_IT *r = (BLT_IT *)p;
+  return strcmp(key, r->key) ? NULL : r;
 }
