@@ -31,11 +31,23 @@
 
 static inline int has_tag(void *p) { return 1 & (intptr_t)p; }
 static inline void *untag(void *p) { return ((char *)p) - 1; }
-// Bit twidding: zero all bits except leading bit, then invert.
+// Returns the byte where each bit is 1 except for the bit corresponding to
+// the leading bit of x.
 // Storing the crit bit in this mask form simplifies decide().
 static inline uint8_t to_mask(uint8_t x) {
-  while (x&(x-1)) x &= x-1;
-  return 255 - x;
+  // SWAR trick that sets every bit after the leading bit to 1.
+  x |= x >> 1;
+  x |= x >> 2;
+  x |= x >> 4;
+  // Zero all the bits after the leading bit then invert.
+  return (x & ~(x >> 1)) ^ 255;
+  if (0) {
+    // Alternative that performs better when there are few set bits.
+    // Zero all bits except leading bit with a bit-twiddling trick.
+    while (x&(x-1)) x &= x-1;
+    // Invert.
+    return 255 - x;
+  }
 }
 static inline int decide(uint8_t c, uint8_t m) { return (1 + (m | c)) >> 8; }
 
