@@ -41,5 +41,6 @@ int main() {
   printf("%s\n", blt_ceil(blt, "cat")->key);
   printf("%s\n", blt_ceil(blt, "fog")->key);
   printf("%s\n", blt_ceil(blt, "foz")->key);
+  blt_clear(blt);
   return 0;
 }

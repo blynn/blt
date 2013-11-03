@@ -67,7 +67,21 @@ int main() {
     exit(1);
   }
   bm_report("BLT iterate");
+  count = 0;
+  int f(BLT_IT *ignore) {
+     count++;
+     return 1;
+  }
+  blt_allprefixed(blt, "", f);
+  if (count != m) {
+    fprintf(stderr, "BUG!\n");
+    exit(1);
+  }
+  bm_report("BLT allprefixed");
   printf("BLT overhead: %lu bytes\n", blt_overhead(blt));
+  bm_init();
+  REP(i, m) blt_delete(blt, key[i]);
+  bm_report("BLT delete");
 
   bm_init();
   REP(i, m) cbt_put_at(cbt, (void *) (intptr_t) i, key[i]);
@@ -85,4 +99,7 @@ int main() {
   }
   bm_report("CBT iterate");
   printf("CBT overhead: %lu bytes\n", cbt_overhead(cbt));
+  bm_init();
+  REP(i, m) cbt_remove(cbt, key[i]);
+  bm_report("CBT delete");
 }

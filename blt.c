@@ -51,6 +51,7 @@ static inline uint8_t to_mask(uint8_t x) {
 }
 static inline int decide(uint8_t c, uint8_t m) { return (1 + (m | c)) >> 8; }
 
+// An internal node. Leaf nodes are described by BLT_IT.
 struct blt_node_s {
   // Tagged pointer:
   //   LSB = 0 for leaf node,
@@ -71,6 +72,23 @@ BLT *blt_new() {
   BLT *blt = malloc(sizeof(*blt));
   blt->root = 0;
   return blt;
+}
+
+void blt_clear(BLT *blt) {
+  void free_node(void *p) {
+    if (!has_tag(p)) {
+      free(((BLT_IT *) p)->key);
+      free(p);
+      return;
+    }
+    void *q = untag(p);
+    void **kid = ((blt_node_ptr)q)->kid;
+    free_node(kid[0]);
+    free_node(kid[1]);
+    free(q);
+  }
+  if (blt->root) free_node(blt->root);
+  free(blt);
 }
 
 size_t blt_overhead(BLT *blt) {
