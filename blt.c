@@ -21,6 +21,11 @@
 //       (byte0 << 8) + mask0 < (byte1 << 8) + mask1
 //   - Deletion: we can return early if the key length is shorter than
 //     the current node's critical bit, as this implies the key is absent.
+//   - When following child pointers, rather than the more elegant
+//     kid[predicate()] where predicate() returns 0 or 1, we sometimes prefer
+//     predicate() ? kid[1] : *kid (much like my old library's explicit left
+//     and right child pointers), as this seems to produce slightly faster
+//     code.
 
 #include <assert.h>
 #include <stdio.h>
@@ -143,7 +148,7 @@ static inline BLT_IT *confident_get(BLT *blt, char *key) {
     blt_node_ptr q = untag(p);
     // When q->byte >= keylen, key is absent, but we must return something.
     // Either kid works; we pick 0 each time.
-    p = q->kid[q->byte < keylen ? decide(key[q->byte], q->mask) : 0];
+    p = q->byte < keylen && decide(key[q->byte], q->mask) ? q->kid[1] : *q->kid;
   }
   return (void *)p;
 }
@@ -278,7 +283,7 @@ int blt_allprefixed(BLT *blt, char *key, int (*fun)(BLT_IT *)) {
     if (q->byte >= keylen) {
       p = q->kid[0];
     } else {
-      p = q->kid[decide(q->mask, key[q->byte])];
+      p = decide(q->mask, key[q->byte]) ? q->kid[1] : *q->kid;
       top = p;
     }
   }
@@ -308,7 +313,7 @@ BLT_IT *blt_get(BLT *blt, char *key) {
   while (has_tag(p)) {
     blt_node_ptr q = untag(p);
     if (q->byte > keylen) return NULL;
-    p = q->kid[decide(key[q->byte], q->mask)];
+    p = decide(key[q->byte], q->mask) ? q->kid[1] : *q->kid;
   }
   BLT_IT *r = (BLT_IT *)p;
   return strcmp(key, r->key) ? NULL : r;
