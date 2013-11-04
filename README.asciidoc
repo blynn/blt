@@ -1,0 +1,14 @@
+= BLT =
+Ben Lynn
+
+The BLT library implements http://cr.yp.to/critbit.html[crit-bit trees].
+After seeing https://github.com/agl/critbit[Adam Langley's library], I was
+inspired to rewrite my old crit-bit tree code.
+
+I highly recommend linking with https://code.google.com/p/gperftools/[tcmalloc].
+
+I'm hoping to find time to add support for trees where each key is the same
+length, and also trees where the keys can contain zero bytes, at which point I
+can replace my old library in various pet projects.
+
+See blt.h for usage.
