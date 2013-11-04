@@ -1,0 +1,45 @@
+#!/bin/bash
+#
+# Simple benchmarking script. Creates a bunch of /tmp files.
+# Places final output in .csv files in the current directory.
+
+dict() {
+ ./$1 < /usr/share/dict/words
+}
+
+seq2M() {
+ seq 2000000 | ./$1
+}
+
+for cmd in dict seq2M; do
+  first=1
+  for bm in blt_bm cbt_bm critbit_bm map_bm umap_bm; do
+    for n in `seq 10`; do
+      if [[ $n -eq 1 ]]; then 
+        echo heading, $bm > /tmp/output.col.$bm
+        $cmd $bm | sed 's/^[^ ]* //;s/: / /;s/[^0-9]*$//' > /tmp/output.$bm
+      else
+        $cmd $bm | sed 's/.*: //;s/[^0-9]*$//' | paste -d' ' /tmp/output.$bm - > /tmp/output.paste.$bm
+        mv /tmp/output.paste.$bm /tmp/output.$bm
+      fi
+    done
+    awk '{
+      sum=0
+      for(i=2; i<=NF; i++) sum+=$i
+      if ($1!="overhead") {
+        printf "%s, %.6f\n", $1, sum/(NF-1)
+      } else {
+        printf "%s, %d\n", $1, sum/(NF-1)
+      }
+    }' /tmp/output.$bm >> /tmp/output.col.$bm
+    if [[ $first -eq 1 ]]; then
+      sort /tmp/output.col.$bm > /tmp/out.tab
+      first=0
+    else
+      sort /tmp/output.col.$bm > /tmp/out.sort
+      join -a1 -a2 -t, -o auto -e' ' /tmp/out.tab /tmp/out.sort > /tmp/out.join
+      mv /tmp/out.join /tmp/out.tab
+    fi
+  done
+  mv /tmp/out.tab "$cmd".csv
+done

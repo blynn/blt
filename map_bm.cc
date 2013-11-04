@@ -1,4 +1,10 @@
 // Benchmarks map<string, int>.
+//
+// To benchmark unordered_map:
+//
+//  $ sed 's/\<map\>/unordered_map/g' map_bm.cc > umap_bm.cc
+//  $ g++ -O3 -std=gnu++11 umap_bm.cc -ltcmalloc
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -65,4 +71,6 @@ int main() {
     exit(1);
   }
   bm_report("map iterate");
+  smap.clear();
+  bm_report("map delete");
 }
