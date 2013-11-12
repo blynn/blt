@@ -35,14 +35,35 @@ void blt_clear(BLT *blt);
 BLT_IT *blt_get(BLT *blt, char *key);
 
 // Inserts a given key and data pair.
-void blt_put(BLT *blt, char *key, void *data);
+// Returns NULL if key was absent, otherwise returns original data stored
+// at key (which could be the NULL pointer).
+void *blt_put(BLT *blt, char *key, void *data);
+
+// Inserts a given key and data pair if key is absent.
+// If key is already present, calls the given callback and passes the extant
+// leaf node holding the key.
+void *blt_put_with(BLT *blt, char *key, void *data,
+                   void *(*already_present_cb)(BLT_IT *));
+
+// Inserts a given key and data pair if key is absent.
+// Returns 0 on success. Returns 1 if key is already present.
+int blt_put_if_absent(BLT *blt, char *key, void *data);
 
 // Deletes a given key from the tree.
 // Returns 1 if a key was deleted, and 0 otherwise.
 int blt_delete(BLT *blt, char *key);
 
-// For all leaf nodes with a given prefix, runs a given callback.
+// Iterates through all leaf nodes with a given prefix in order and runs the
+// given callback on each one.
+// If the callback returns 1, continues iteration, otherwise halts and returns
+// the value returned by the callback.
 int blt_allprefixed(BLT *blt, char *key, int (*fun)(BLT_IT *));
+
+// Iterates through all leaf nodes in order and runs the given callback.
+static inline void blt_forall(BLT *blt, void (*fun)(BLT_IT *)) {
+  int f(BLT_IT *it) { return fun(it), 1; }
+  blt_allprefixed(blt, "", f);
+}
 
 // Returns the leaf node with the smallest key.
 BLT_IT *blt_first(BLT *blt);

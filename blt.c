@@ -187,14 +187,15 @@ BLT_IT *blt_ceilfloor(BLT *blt, char *key, int way) {
 BLT_IT *blt_ceil (BLT *blt, char *key) { return blt_ceilfloor(blt, key, 0); }
 BLT_IT *blt_floor(BLT *blt, char *key) { return blt_ceilfloor(blt, key, 1); }
 
-void blt_put(BLT *blt, char *key, void *data) {
+void *blt_put_with(BLT *blt, char *key, void *data,
+                   void *(*already_present_cb)(BLT_IT *)) {
   BLT_IT *p = confident_get(blt, key);
   if (!p) {  // Empty tree case.
     p = malloc(sizeof(*p));
     blt->root = p;
     p->key = strdup(key);
     p->data = data;
-    return;
+    return 0;
   }
   // Compare keys.
   for(char *c = key, *pc = p->key;; c++, pc++) {
@@ -225,13 +226,24 @@ void blt_put(BLT *blt, char *key, void *data) {
       }
       n->kid[1 - ndir] = *p0;
       *p0 = 1 + (char *)n;
-      return;
+      return 0;
     }
-    if (!*c) {
-      ((BLT_IT *) p)->data = data;
-      return;
-    }
+    if (!*c) return already_present_cb(p);
   }
+}
+
+void *blt_put(BLT *blt, char *key, void *data) {
+  void *f(BLT_IT *it) {
+    void *orig = it->data;
+    it->data = data;
+    return orig;
+  }
+  return blt_put_with(blt, key, data, f);
+}
+
+int blt_put_if_absent(BLT *blt, char *key, void *data) {
+  void *f(BLT_IT *it) { return (void *) 1; }
+  return blt_put_with(blt, key, data, f) != 0;
 }
 
 int blt_delete(BLT *blt, char *key) {

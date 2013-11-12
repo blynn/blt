@@ -1,5 +1,8 @@
 = BLT =
-Ben Lynn
+Ben Lynn <blynn@cs.stanford.edu>
+2013
+
+== The BLT library ==
 
 The BLT library implements http://cr.yp.to/critbit.html[crit-bit trees].
 After seeing https://github.com/agl/critbit[Adam Langley's library], I was
@@ -11,9 +14,11 @@ I'm hoping to find time to add support for trees where each key is the same
 length, and also trees where the keys can contain zero bytes, at which point I
 can replace my old library in various pet projects.
 
-See blt.h for usage.
+See `blt.h` for usage.
 
 == License ==
+
+See `COPYING` for details.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
