@@ -23,6 +23,12 @@
 //       (byte0 << 8) + mask0 < (byte1 << 8) + mask1
 //   - Deletion: we can return early if the key length is shorter than
 //     the current node's critical bit, as this implies the key is absent.
+//   - When following child pointers, rather than p->kid + predicate(),
+//     we prefer predicate() ? p->kid + 1 : p->kid, as this is faster on my
+//     system. We can thus relax predicate(): instead of returning 0 or 1,
+//     it's fine if it simply returns 0 or nonzero. This means we can store
+//     the plain bitmask instead of its inversion, and check the bit with
+//     a single AND.
 
 #include <assert.h>
 #include <stdio.h>
@@ -33,14 +39,13 @@
 
 // Returns the byte where each bit is 1 except for the bit corresponding to
 // the leading bit of x.
-// Storing the crit bit in this mask form simplifies decide().
 static inline uint8_t to_mask(uint8_t x) {
   // SWAR trick that sets every bit after the leading bit to 1.
   x |= x >> 1;
   x |= x >> 2;
   x |= x >> 4;
   // Zero all the bits after the leading bit then invert.
-  return (x & ~(x >> 1)) ^ 255;
+  return x & ~(x >> 1);
   if (0) {
     // Alternative that performs better when there are few set bits.
     // Zero all bits except leading bit with a bit-twiddling trick.
@@ -49,7 +54,6 @@ static inline uint8_t to_mask(uint8_t x) {
     return 255 - x;
   }
 }
-static inline int decide(uint8_t c, uint8_t m) { return (1 + (m | c)) >> 8; }
 
 // An internal node. Leaf nodes are described by BLT_IT.
 struct blt_node_s {
@@ -62,6 +66,10 @@ struct blt_node_s {
   struct blt_node_s *kid;
 };
 typedef struct blt_node_s *blt_node_ptr;
+
+static inline blt_node_ptr follow(blt_node_ptr p, char *key) {
+  return key[p->byte] & p->mask ? p->kid + 1 : p->kid;
+}
 
 struct BLT {
   struct blt_node_s root[1];
@@ -127,21 +135,33 @@ BLT_IT *blt_last (BLT *blt) {
   return blt->empty ? 0 : blt_firstlast(blt->root, 1);
 }
 
-// 'it' must be an element of 'blt'.
-BLT_IT *blt_nextprev(BLT *blt, BLT_IT *it, int way) {
+BLT_IT *blt_next(BLT *blt, BLT_IT *it) {
   blt_node_ptr p = blt->root, other = 0;
   while (p->is_internal) {
-    blt_node_ptr q = p->kid;
-    int dir = decide(p->mask, it->key[p->byte]);
-    if (dir == way) other = q + 1 - way;
-    p = q + dir;
+    if (!(it->key[p->byte] & p->mask)) {
+      other = p->kid + 1;
+      p = p->kid;
+    } else {
+      p = p->kid + 1;
+    }
   }
   assert(!strcmp(((BLT_IT *)p)->key, it->key));
-  return blt_firstlast(other, way);
+  return blt_firstlast(other, 0);
 }
 
-BLT_IT *blt_next(BLT *blt, BLT_IT *it) { return blt_nextprev(blt, it, 0); }
-BLT_IT *blt_prev(BLT *blt, BLT_IT *it) { return blt_nextprev(blt, it, 1); }
+BLT_IT *blt_prev(BLT *blt, BLT_IT *it) {
+  blt_node_ptr p = blt->root, other = 0;
+  while (p->is_internal) {
+    if (it->key[p->byte] & p->mask) {
+      other = p->kid;
+      p = p->kid + 1;
+    } else {
+      p = p->kid;
+    }
+  }
+  assert(!strcmp(((BLT_IT *)p)->key, it->key));
+  return blt_firstlast(other, 1);
+}
 
 // Walk down the tree as if the key is there.
 static inline BLT_IT *confident_get(BLT *blt, char *key) {
@@ -151,7 +171,7 @@ static inline BLT_IT *confident_get(BLT *blt, char *key) {
   while (p->is_internal) {
     // When p->byte >= keylen, key is absent, but we must return something.
     // Either kid works; we pick 0 each time.
-    p = p->kid + (p->byte < keylen && decide(key[p->byte], p->mask));
+    p = p->byte < keylen && (key[p->byte] & p->mask) ? p->kid + 1 : p->kid;
   }
   return (void *)p;
 }
@@ -166,17 +186,17 @@ BLT_IT *blt_ceilfloor(BLT *blt, char *key, int way) {
     if (x) {
       int byte = c - key;
       x = to_mask(x);
-      int ndir = decide(x, key[byte]);
       // Walk down the tree until we hit an external node or a node
       // whose crit bit is higher.
       blt_node_ptr p = blt->root, other = 0;
       while (p->is_internal) {
-        if ((byte << 8) + x < (p->byte << 8) + p->mask) break;
-        int dir = decide(p->mask, key[p->byte]);
+        if ((byte << 8) + p->mask < (p->byte << 8) + x) break;
+        int dir = !!(p->mask & key[p->byte]);
         blt_node_ptr q = p->kid;
         if (dir == way) other = q + 1 - way;
         p = q + dir;
       }
+      int ndir = !!(x & key[byte]);
       if (ndir == way) other = p;
       return blt_firstlast(other, way);
     }
@@ -205,8 +225,10 @@ void *blt_put_with(BLT *blt, char *key, void *data,
       // Allocate 2 adjacent nodes and copy the leaf into the appropriate side.
       blt_node_ptr n = malloc(2 * sizeof(*n));
       x = to_mask(x);
-      int ndir = decide(*c, x);
-      BLT_IT *leaf = (BLT_IT *) (n + ndir);
+      BLT_IT *leaf = (BLT_IT *)n;
+      blt_node_ptr other = n;
+      if (*c & x) leaf++; else other++;
+
       leaf->key = strdup(key);
       leaf->data = data;
 
@@ -215,13 +237,13 @@ void *blt_put_with(BLT *blt, char *key, void *data,
       int byte = c - key;
       blt_node_ptr p = (blt_node_ptr) blt->root;
       while(p->is_internal) {
-        if ((byte << 8) + x < (p->byte << 8) + p->mask) break;
-        p = p->kid + decide(key[p->byte], p->mask);
+        if ((byte << 8) + p->mask < (p->byte << 8) + x) break;
+        p = follow(p, key);
       }
 
       // Copy the node's contents to the other side of our 2 new adjacent nodes,
       // then replace it with our critbit and pointer to the new nodes.
-      n[1 - ndir] = *p;
+      *other = *p;
       p->byte = byte;
       p->mask = x;
       p->kid = n;
@@ -249,23 +271,21 @@ int blt_put_if_absent(BLT *blt, char *key, void *data) {
 int blt_delete(BLT *blt, char *key) {
   if (blt->empty) return 0;
   int keylen = strlen(key);
-  blt_node_ptr p = blt->root, q0 = 0, q = 0;
-  int dir;
+  blt_node_ptr p = blt->root, p0 = 0;
   while (p->is_internal) {
-    q = p->kid;
     if (p->byte > keylen) return 0;
-    dir = decide(p->mask, key[p->byte]);
-    q0 = p;
-    p = q + dir;
+    p0 = p;
+    p = follow(p, key);
   }
   BLT_IT *leaf = (BLT_IT *)p;
   if (strcmp(key, leaf->key)) return 0;
   free(leaf->key);
-  if (!q) {
+  if (!p0) {
     blt->empty = 1;
     return 1;
   }
-  *q0 = q[1 - dir];
+  blt_node_ptr q = p0->kid;
+  *p0 = *(p == q ? q + 1 : q);
   free(q);
   return 1;
 }
@@ -278,21 +298,17 @@ int blt_allprefixed(BLT *blt, char *key, int (*fun)(BLT_IT *)) {
     if (p->byte >= keylen) {
       p = p->kid;
     } else {
-      p = p->kid + decide(p->mask, key[p->byte]);
+      p = follow(p, key);
       top = p;
     }
   }
   if (strncmp(key, ((BLT_IT *)p)->key, keylen)) return 1;
   int traverse(blt_node_ptr p) {
     if (p->is_internal) {
-      for (int dir = 0; dir < 2; dir++) {
-        int status = traverse(p->kid + dir);
-        switch(status) {
-        case 1: break;
-        case 0: return 0;
-        default: return status;
-        }
-      }
+      int status = traverse(p->kid);
+      if (status != 1) return status;
+      status = traverse(p->kid + 1);
+      if (status != 1) return status;
       return 1;
     }
     return fun((BLT_IT *)p);
@@ -308,7 +324,7 @@ BLT_IT *blt_get(BLT *blt, char *key) {
     // We could shave off a few percent by skipping checks like the
     // following, but buffer overreads are bad form.
     if (p->byte > keylen) return 0;
-    p = p->kid + decide(key[p->byte], p->mask);
+    p = follow(p, key);
   }
   BLT_IT *r = (BLT_IT *)p;
   return strcmp(key, r->key) ? 0 : r;
