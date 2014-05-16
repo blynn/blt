@@ -90,3 +90,9 @@ BLT_IT *blt_floor(BLT *blt, char *key);
 // Returns the number of bytes used by the tree, excluding memory taken by
 // the bytes of the keys.
 size_t blt_overhead(BLT *blt);
+
+// Returns 1 if tree is empty, 0 otherwise.
+int blt_empty(BLT *blt);
+
+// Returns number of keys.
+int blt_size(BLT *blt);

@@ -329,3 +329,14 @@ BLT_IT *blt_get(BLT *blt, char *key) {
   BLT_IT *r = (BLT_IT *)p;
   return strcmp(key, r->key) ? 0 : r;
 }
+
+int blt_empty(BLT *blt) {
+  return blt->empty;
+}
+
+int blt_size(BLT *blt) {
+  int r = 0;
+  void f(BLT_IT *it) { r++; }
+  blt_forall(blt, f);
+  return r;
+}
