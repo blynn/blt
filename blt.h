@@ -35,15 +35,14 @@ void blt_clear(BLT *blt);
 BLT_IT *blt_get(BLT *blt, char *key);
 
 // Inserts a given key and data pair.
-// Returns NULL if key was absent, otherwise returns original data stored
-// at key (which could be the NULL pointer).
-void *blt_put(BLT *blt, char *key, void *data);
+// Returns the leaf node containing them.
+BLT_IT *blt_put(BLT *blt, char *key, void *data);
 
 // Inserts a given key and data pair if key is absent.
 // If key is already present, calls the given callback and passes the extant
 // leaf node holding the key.
-void *blt_put_with(BLT *blt, char *key, void *data,
-                   void *(*already_present_cb)(BLT_IT *));
+BLT_IT *blt_put_with(BLT *blt, char *key, void *data,
+                     void (*already_present_cb)(BLT_IT *));
 
 // Inserts a given key and data pair if key is absent.
 // Returns 0 on success. Returns 1 if key is already present.
