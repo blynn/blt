@@ -34,15 +34,17 @@ void blt_clear(BLT *blt);
 // Returns NULL if there is no such key.
 BLT_IT *blt_get(BLT *blt, char *key);
 
+// Creates or retrieves the leaf node at a given key.
+BLT_IT *blt_set(BLT *blt, char *key);
+
+// Creates or retrieves the leaf node at a given key.
+// If is_new is not NULL, sets *is_new to 1 if a new node was created,
+// and 0 otherwise.
+BLT_IT *blt_setp(BLT *blt, char *key, int *is_new);
+
 // Inserts a given key and data pair.
 // Returns the leaf node containing them.
 BLT_IT *blt_put(BLT *blt, char *key, void *data);
-
-// Inserts a given key and data pair if key is absent.
-// If key is already present, calls the given callback and passes the extant
-// leaf node holding the key.
-BLT_IT *blt_put_with(BLT *blt, char *key, void *data,
-                     void (*already_present_cb)(BLT_IT *));
 
 // Inserts a given key and data pair if key is absent.
 // Returns 0 on success. Returns 1 if key is already present.

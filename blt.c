@@ -207,14 +207,14 @@ BLT_IT *blt_ceilfloor(BLT *blt, char *key, int way) {
 BLT_IT *blt_ceil (BLT *blt, char *key) { return blt_ceilfloor(blt, key, 0); }
 BLT_IT *blt_floor(BLT *blt, char *key) { return blt_ceilfloor(blt, key, 1); }
 
-BLT_IT *blt_put_with(BLT *blt, char *key, void *data,
-                   void (*already_present_cb)(BLT_IT *)) {
+BLT_IT *blt_setp(BLT *blt, char *key, int *is_new) {
   BLT_IT *p = confident_get(blt, key);
   if (!p) {  // Empty tree case.
     blt->empty = 0;
     BLT_IT *leaf = (BLT_IT *) blt->root;
     leaf->key = strdup(key);
-    leaf->data = data;
+    leaf->data = 0;
+    if (is_new) *is_new = 1;
     return leaf;
   }
   // Compare keys.
@@ -230,7 +230,7 @@ BLT_IT *blt_put_with(BLT *blt, char *key, void *data,
       if (*c & x) leaf++; else other++;
 
       leaf->key = strdup(key);
-      leaf->data = data;
+      leaf->data = 0;
 
       // Find the first node in the path whose critbit is higher than ours,
       // or the external node.
@@ -248,25 +248,29 @@ BLT_IT *blt_put_with(BLT *blt, char *key, void *data,
       p->mask = x;
       p->kid = n;
       p->is_internal = 1;
+      if (is_new) *is_new = 1;
       return leaf;
     }
     if (!*c) {
-      already_present_cb(p);
+      if (is_new) *is_new = 0;
       return p;
     }
   }
 }
 
+BLT_IT *blt_set(BLT *blt, char *key) { return blt_setp(blt, key, 0); }
+
 BLT_IT *blt_put(BLT *blt, char *key, void *data) {
-  void f(BLT_IT *it) { it->data = data; }
-  return blt_put_with(blt, key, data, f);
+  BLT_IT *it = blt_set(blt, key);
+  it->data = data;
+  return it;
 }
 
 int blt_put_if_absent(BLT *blt, char *key, void *data) {
-  int found = 0;
-  void f(BLT_IT *it) { found = 1; }
-  blt_put_with(blt, key, data, f);
-  return found;
+  int is_new;
+  BLT_IT *it = blt_setp(blt, key, &is_new);
+  if (is_new) it->data = data;
+  return !is_new;
 }
 
 int blt_delete(BLT *blt, char *key) {
